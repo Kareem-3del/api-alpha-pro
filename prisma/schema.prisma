@@ -1,0 +1,285 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum WalletNetwork {
+  BEP20
+  TRC20
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  PROFIT
+  REFERRAL_BONUS
+  TEAM_COMMISSION
+  WEEKLY_SALARY
+  DEPOSIT_BONUS
+}
+
+enum TransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+enum InvestmentStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id                String    @id @default(uuid())
+  username          String    @unique
+  email             String    @unique
+  password          String
+  withdrawalPin     String?   // Hashed 4-6 digit PIN for withdrawals
+  isAdmin           Boolean   @default(false)
+  status            UserStatus @default(PENDING)
+  emailVerified     Boolean   @default(false)
+  referralCode      String    @unique
+  referredBy        String?
+  referrer          User?     @relation("Referrals", fields: [referredBy], references: [id])
+  referrals         User[]    @relation("Referrals")
+  balance           Decimal   @default(0) @db.Decimal(18, 8)
+  totalDeposits     Decimal   @default(0) @db.Decimal(18, 8)
+  totalWithdrawals  Decimal   @default(0) @db.Decimal(18, 8)
+  totalProfit       Decimal   @default(0) @db.Decimal(18, 8)
+  totalTeamEarnings Decimal   @default(0) @db.Decimal(18, 8)
+  language          String    @default("en")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  wallet            Wallet?
+  investments       Investment[]
+  transactions      Transaction[]
+  deposits          Deposit[]
+  withdrawals       Withdrawal[]
+  verificationCodes VerificationCode[]
+  profitRecords     ProfitRecord[]
+  teamBonuses       TeamBonus[]
+  weeklySalaries    WeeklySalary[]
+
+  @@index([referralCode])
+  @@index([email])
+  @@index([username])
+}
+
+model Wallet {
+  id        String        @id @default(uuid())
+  userId    String        @unique
+  user      User          @relation(fields: [userId], references: [id])
+  address   String
+  network   WalletNetwork
+  verified  Boolean       @default(false)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([address])
+}
+
+model VerificationCode {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  code      String
+  type      String   // EMAIL_VERIFY, WALLET_LINK, WALLET_CHANGE, PASSWORD_RESET
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, type])
+  @@index([code])
+}
+
+model Package {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  durationDays  Int
+  dailyProfit   Decimal  @db.Decimal(5, 2) // Percentage
+  minAmount     Decimal  @db.Decimal(18, 8)
+  maxAmount     Decimal  @db.Decimal(18, 8)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  investments   Investment[]
+}
+
+model Investment {
+  id            String           @id @default(uuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id])
+  packageId     String
+  package       Package          @relation(fields: [packageId], references: [id])
+  amount        Decimal          @db.Decimal(18, 8)
+  dailyProfit   Decimal          @db.Decimal(5, 2) // Percentage locked at time of investment
+  totalProfit   Decimal          @default(0) @db.Decimal(18, 8)
+  status        InvestmentStatus @default(ACTIVE)
+  startDate     DateTime         @default(now())
+  endDate       DateTime
+  lastProfitAt  DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  profitRecords ProfitRecord[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Transaction {
+  id          String            @id @default(uuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id])
+  type        TransactionType
+  amount      Decimal           @db.Decimal(18, 8)
+  fee         Decimal           @default(0) @db.Decimal(18, 8)
+  netAmount   Decimal           @db.Decimal(18, 8)
+  status      TransactionStatus @default(PENDING)
+  reference   String?           // External reference (tx hash, etc)
+  description String?
+  metadata    Json?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+}
+
+model Deposit {
+  id              String            @id @default(uuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id])
+  amount          Decimal           @db.Decimal(18, 8)
+  network         WalletNetwork
+  depositAddress  String
+  depositWalletId String?           // Reference to pooled wallet
+  txHash          String?
+  currency        String            @default("USDT") // Currency detected from blockchain
+  status          TransactionStatus @default(PENDING)
+  confirmedAt     DateTime?
+  bonusAmount     Decimal           @default(0) @db.Decimal(18, 8) // 3% deposit bonus
+  expiresAt       DateTime?         // When this deposit request expires
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([depositAddress])
+  @@index([depositWalletId])
+  @@index([txHash])
+  @@index([status])
+}
+
+model Withdrawal {
+  id          String            @id @default(uuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id])
+  amount      Decimal           @db.Decimal(18, 8)
+  fee         Decimal           @db.Decimal(18, 8)
+  netAmount   Decimal           @db.Decimal(18, 8)
+  network     WalletNetwork
+  toAddress   String
+  txHash      String?
+  status      TransactionStatus @default(PENDING)
+  processedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model ProfitRecord {
+  id           String     @id @default(uuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  investmentId String
+  investment   Investment @relation(fields: [investmentId], references: [id])
+  amount       Decimal    @db.Decimal(18, 8)
+  profitDate   DateTime
+  createdAt    DateTime   @default(now())
+
+  @@index([userId])
+  @@index([investmentId])
+  @@index([profitDate])
+}
+
+model TeamBonus {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  fromUserId  String   // The user whose profit generated this bonus
+  level       Int      // 1 or 2
+  percentage  Decimal  @db.Decimal(5, 2) // 10% or 5%
+  amount      Decimal  @db.Decimal(18, 8)
+  bonusDate   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([bonusDate])
+}
+
+model WeeklySalary {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  referralCount Int
+  amount       Decimal  @db.Decimal(18, 8)
+  weekStart    DateTime
+  weekEnd      DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([weekStart])
+}
+
+model SystemConfig {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+
+  @@index([key])
+}
+
+// Wallet pool for deposits - wallets are assigned to users for 1 hour then released
+model DepositWallet {
+  id              String        @id @default(uuid())
+  address         String        @unique
+  privateKey      String        // Encrypted private key
+  network         WalletNetwork
+  derivationIndex Int           // HD wallet derivation index
+  webhookId       String?       // Tatum webhook subscription ID
+
+  // Assignment tracking
+  assignedToUserId String?
+  assignedAt       DateTime?
+  expiresAt        DateTime?
+  isAvailable      Boolean       @default(true)
+
+  // Stats
+  totalDeposits    Int           @default(0)
+  lastUsedAt       DateTime?
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([network, isAvailable])
+  @@index([address])
+  @@index([assignedToUserId])
+  @@index([expiresAt])
+}
