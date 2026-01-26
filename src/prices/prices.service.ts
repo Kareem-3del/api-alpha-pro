@@ -1,6 +1,7 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { AxiosResponse } from 'axios';
 import { CryptoPrice, CoinDetails, PriceHistoryPoint } from './dto/prices.dto';
 
 @Injectable()
@@ -45,7 +46,7 @@ export class PricesService {
       const coinIds = coins?.length ? coins : this.DEFAULT_COINS;
       const url = `${this.COINGECKO_API}/coins/markets`;
 
-      const response = await firstValueFrom(
+      const response: AxiosResponse<any[]> = await firstValueFrom(
         this.httpService.get(url, {
           params: {
             vs_currency: currency,
@@ -106,7 +107,7 @@ export class PricesService {
   ): Promise<CoinDetails> {
     try {
       // Fetch coin data and market chart in parallel
-      const [coinResponse, chartResponse] = await Promise.all([
+      const [coinResponse, chartResponse]: [AxiosResponse<any>, AxiosResponse<any>] = await Promise.all([
         firstValueFrom(
           this.httpService.get(`${this.COINGECKO_API}/coins/${coinId}`, {
             params: {
@@ -176,7 +177,7 @@ export class PricesService {
 
   async searchCoins(query: string): Promise<{ id: string; name: string; symbol: string }[]> {
     try {
-      const response = await firstValueFrom(
+      const response: AxiosResponse<any> = await firstValueFrom(
         this.httpService.get(`${this.COINGECKO_API}/search`, {
           params: { query },
         }),
@@ -204,7 +205,7 @@ export class PricesService {
     marketCapChange24h: number;
   }> {
     try {
-      const response = await firstValueFrom(
+      const response: AxiosResponse<any> = await firstValueFrom(
         this.httpService.get(`${this.COINGECKO_API}/global`),
       );
 

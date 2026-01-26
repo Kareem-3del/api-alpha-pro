@@ -17,6 +17,7 @@ import { EmailModule } from './email/email.module';
 import { TatumModule } from './tatum/tatum.module';
 import { AdminModule } from './admin/admin.module';
 import { PricesModule } from './prices/prices.module';
+import { TransactionsModule } from './transactions/transactions.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { PricesModule } from './prices/prices.module';
     TatumModule,
     AdminModule,
     PricesModule,
+    TransactionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
