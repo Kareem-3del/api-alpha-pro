@@ -12,9 +12,11 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletPoolService } from '../deposits/wallet-pool.service';
 import { DepositsService } from '../deposits/deposits.service';
+import { WithdrawalsService } from '../withdrawals/withdrawals.service';
 import { WalletNetwork } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { Decimal } from '@prisma/client/runtime/library';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -26,6 +28,7 @@ export class AdminController {
     private prisma: PrismaService,
     private walletPoolService: WalletPoolService,
     private depositsService: DepositsService,
+    private withdrawalsService: WithdrawalsService,
   ) {}
 
   // ==================== DASHBOARD STATS ====================
@@ -267,5 +270,224 @@ export class AdminController {
     });
 
     return user;
+  }
+
+  // ==================== WITHDRAWAL MANAGEMENT ====================
+
+  @Get('withdrawals')
+  async getAllWithdrawals(
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const where = status ? { status: status as any } : {};
+    const take = limit ? parseInt(limit) : 100;
+
+    const withdrawals = await this.prisma.withdrawal.findMany({
+      where,
+      take,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    // Get summary stats
+    const stats = await this.prisma.withdrawal.groupBy({
+      by: ['status'],
+      _count: true,
+      _sum: { amount: true },
+    });
+
+    return {
+      withdrawals,
+      count: withdrawals.length,
+      stats: stats.reduce((acc, s) => {
+        acc[s.status] = { count: s._count, total: s._sum.amount };
+        return acc;
+      }, {}),
+    };
+  }
+
+  @Get('withdrawals/pending')
+  async getPendingWithdrawals() {
+    const withdrawals = await this.prisma.withdrawal.findMany({
+      where: { status: 'PENDING' },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+            balance: true,
+          },
+        },
+      },
+    });
+
+    const totalPending = withdrawals.reduce(
+      (sum, w) => sum + Number(w.netAmount),
+      0,
+    );
+
+    return {
+      withdrawals,
+      count: withdrawals.length,
+      totalPending,
+    };
+  }
+
+  @Get('withdrawals/:id')
+  async getWithdrawalDetails(@Param('id') withdrawalId: string) {
+    const withdrawal = await this.prisma.withdrawal.findUnique({
+      where: { id: withdrawalId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+            balance: true,
+            wallet: true,
+          },
+        },
+      },
+    });
+
+    return withdrawal;
+  }
+
+  @Post('withdrawals/:id/approve')
+  async approveWithdrawal(@Param('id') withdrawalId: string) {
+    this.logger.log(`Admin approving withdrawal ${withdrawalId}`);
+
+    try {
+      const result = await this.withdrawalsService.processWithdrawal(withdrawalId);
+      return {
+        success: true,
+        ...result,
+      };
+    } catch (error) {
+      this.logger.error(`Withdrawal approval failed: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  }
+
+  @Post('withdrawals/:id/reject')
+  async rejectWithdrawal(
+    @Param('id') withdrawalId: string,
+    @Body('reason') reason?: string,
+  ) {
+    this.logger.log(`Admin rejecting withdrawal ${withdrawalId}`);
+
+    const withdrawal = await this.prisma.withdrawal.findUnique({
+      where: { id: withdrawalId },
+      include: { user: true },
+    });
+
+    if (!withdrawal) {
+      return { success: false, error: 'Withdrawal not found' };
+    }
+
+    if (withdrawal.status !== 'PENDING') {
+      return { success: false, error: 'Withdrawal already processed' };
+    }
+
+    // Refund the user's balance
+    await this.prisma.$transaction([
+      this.prisma.withdrawal.update({
+        where: { id: withdrawalId },
+        data: {
+          status: 'CANCELLED',
+          processedAt: new Date(),
+        },
+      }),
+      this.prisma.user.update({
+        where: { id: withdrawal.userId },
+        data: {
+          balance: { increment: Number(withdrawal.amount) },
+        },
+      }),
+      this.prisma.transaction.updateMany({
+        where: {
+          userId: withdrawal.userId,
+          type: 'WITHDRAWAL',
+          status: 'PENDING',
+        },
+        data: {
+          status: 'CANCELLED',
+          description: reason ? `Rejected: ${reason}` : 'Withdrawal rejected',
+        },
+      }),
+    ]);
+
+    this.logger.log(`Withdrawal ${withdrawalId} rejected. Balance refunded.`);
+
+    return {
+      success: true,
+      message: 'Withdrawal rejected and balance refunded',
+      refundedAmount: withdrawal.amount,
+    };
+  }
+
+  @Post('withdrawals/:id/manual-complete')
+  async manualCompleteWithdrawal(
+    @Param('id') withdrawalId: string,
+    @Body('txHash') txHash: string,
+  ) {
+    this.logger.log(`Admin manually completing withdrawal ${withdrawalId} with txHash ${txHash}`);
+
+    const withdrawal = await this.prisma.withdrawal.findUnique({
+      where: { id: withdrawalId },
+      include: { user: true },
+    });
+
+    if (!withdrawal) {
+      return { success: false, error: 'Withdrawal not found' };
+    }
+
+    if (withdrawal.status !== 'PENDING') {
+      return { success: false, error: 'Withdrawal already processed' };
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.withdrawal.update({
+        where: { id: withdrawalId },
+        data: {
+          status: 'CONFIRMED',
+          txHash,
+          processedAt: new Date(),
+        },
+      }),
+      this.prisma.user.update({
+        where: { id: withdrawal.userId },
+        data: {
+          totalWithdrawals: { increment: Number(withdrawal.amount) },
+        },
+      }),
+      this.prisma.transaction.updateMany({
+        where: {
+          userId: withdrawal.userId,
+          type: 'WITHDRAWAL',
+          status: 'PENDING',
+        },
+        data: {
+          status: 'CONFIRMED',
+          reference: txHash,
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      message: 'Withdrawal manually completed',
+      txHash,
+    };
   }
 }

@@ -74,19 +74,46 @@ export class UsersService {
   }
 
   async getDashboard(userId: string) {
-    // Simple version - just get user basic data
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
+      include: {
+        wallet: true,
+        referrals: {
+          where: {
+            emailVerified: true,
+            totalDeposits: { gt: 0 },
+          },
+          select: { id: true },
+        },
+      },
     });
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    // Return minimal data for now
-    const referralCount = 0;
-    const totalActiveInvestment = 0;
-    const expectedDailyProfit = 0;
+    // Get active investments
+    const activeInvestments = await this.prisma.investment.findMany({
+      where: {
+        userId,
+        status: 'ACTIVE',
+      },
+      include: {
+        package: true,
+      },
+      orderBy: { startDate: 'desc' },
+    });
+
+    // Calculate totals
+    const referralCount = user.referrals.length;
+    let totalActiveInvestment = 0;
+    let expectedDailyProfit = 0;
+
+    for (const inv of activeInvestments) {
+      totalActiveInvestment += Number(inv.amount);
+      expectedDailyProfit += (Number(inv.amount) * Number(inv.dailyProfit)) / 100;
+    }
+
     const currentWeeklySalary = getWeeklySalaryAmount(referralCount);
 
     // Calculate next tier
@@ -112,6 +139,26 @@ export class UsersService {
       referralsNeeded = 100 - referralCount;
     }
 
+    // Get recent transactions
+    const recentTransactions = await this.prisma.transaction.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+
+    // Format active investments for response
+    const formattedInvestments = activeInvestments.map((inv) => ({
+      id: inv.id,
+      packageName: inv.package.name,
+      amount: inv.amount,
+      dailyProfit: inv.dailyProfit,
+      totalProfit: inv.totalProfit,
+      status: inv.status,
+      startDate: inv.startDate,
+      endDate: inv.endDate,
+      daysRemaining: Math.max(0, Math.ceil((inv.endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))),
+    }));
+
     return {
       balance: user.balance,
       totalDeposits: user.totalDeposits,
@@ -122,14 +169,21 @@ export class UsersService {
       expectedDailyProfit,
       referralCode: user.referralCode,
       referralCount,
-      hasWallet: false,
+      hasWallet: !!user.wallet,
       hasPin: !!user.withdrawalPin,
       currentWeeklySalary,
       nextTierReferrals,
       nextTierSalary,
       referralsNeeded,
-      activeInvestments: [],
-      recentTransactions: [],
+      activeInvestments: formattedInvestments,
+      recentTransactions,
+      // Investment summary
+      investmentSummary: {
+        totalInvestments: activeInvestments.length,
+        totalActiveAmount: totalActiveInvestment,
+        expectedDailyProfit,
+        expectedMonthlyProfit: expectedDailyProfit * 30,
+      },
     };
   }
 

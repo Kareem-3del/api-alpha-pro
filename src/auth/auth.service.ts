@@ -113,17 +113,23 @@ export class AuthService {
     }
 
     if (!user.emailVerified) {
-      throw new UnauthorizedException('Please verify your email first');
+      // Return special response for unverified users
+      throw new UnauthorizedException({
+        message: 'Please verify your email first',
+        code: 'EMAIL_NOT_VERIFIED',
+        email: user.email,
+      });
     }
 
     if (user.status === 'SUSPENDED') {
       throw new UnauthorizedException('Account suspended');
     }
 
-    const token = this.generateToken(user.id, user.email);
+    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email);
 
     return {
-      access_token: token,
+      access_token: accessToken,
+      refresh_token: refreshToken,
       user: {
         id: user.id,
         username: user.username,
@@ -173,11 +179,12 @@ export class AuthService {
       }),
     ]);
 
-    const token = this.generateToken(user.id, user.email);
+    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.email);
 
     return {
       message: 'Email verified successfully',
-      access_token: token,
+      access_token: accessToken,
+      refresh_token: refreshToken,
     };
   }
 
@@ -225,6 +232,53 @@ export class AuthService {
 
     // Send email
     await this.emailService.sendVerificationEmail(email, code);
+  }
+
+  async refreshToken(refreshToken: string) {
+    try {
+      const payload = this.jwtService.verify(refreshToken);
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        include: { wallet: true },
+      });
+
+      if (!user || user.status === 'SUSPENDED') {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      const tokens = await this.generateTokens(user.id, user.email);
+
+      return {
+        access_token: tokens.accessToken,
+        refresh_token: tokens.refreshToken,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          balance: user.balance,
+          referralCode: user.referralCode,
+          language: user.language,
+          hasWallet: !!user.wallet,
+        },
+      };
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+  }
+
+  private async generateTokens(userId: string, email: string) {
+    const accessToken = this.jwtService.sign(
+      { sub: userId, email, type: 'access' },
+      { expiresIn: '30d' },
+    );
+
+    const refreshToken = this.jwtService.sign(
+      { sub: userId, email, type: 'refresh' },
+      { expiresIn: '90d' },
+    );
+
+    return { accessToken, refreshToken };
   }
 
   private generateToken(userId: string, email: string): string {
