@@ -133,9 +133,12 @@ export class WalletPoolService {
     let privateKey: string;
 
     // Check if we're in test mode (no real Tatum API key)
-    const isTestMode = this.configService.get<string>('TATUM_API_KEY')?.includes('your-') ||
-                       !this.configService.get<string>('BSC_MNEMONIC') ||
-                       this.configService.get<string>('BSC_MNEMONIC')?.includes('your-');
+    const tatumKey = this.configService.get<string>('TATUM_API_KEY');
+    const bscMnemonic = this.configService.get<string>('BSC_MNEMONIC');
+    this.logger.log(`Config check - TATUM_API_KEY: ${tatumKey?.substring(0, 15)}..., BSC_MNEMONIC: ${bscMnemonic?.substring(0, 15)}...`);
+    const isTestMode = tatumKey?.includes('your-') ||
+                       !bscMnemonic ||
+                       bscMnemonic?.includes('your-');
 
     if (isTestMode) {
       // Generate test addresses for development

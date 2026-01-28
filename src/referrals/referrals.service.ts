@@ -19,15 +19,27 @@ export class ReferralsService {
   }
 
   async getReferrals(userId: string) {
+    // Only count referrals who have verified email AND made at least one deposit
     const referrals = await this.prisma.user.findMany({
-      where: { referredBy: userId },
+      where: {
+        referredBy: userId,
+        emailVerified: true,
+        totalDeposits: { gt: 0 },
+      },
       select: {
         id: true,
         username: true,
         createdAt: true,
         totalDeposits: true,
         _count: {
-          select: { referrals: true },
+          select: {
+            referrals: {
+              where: {
+                emailVerified: true,
+                totalDeposits: { gt: 0 },
+              },
+            },
+          },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -47,7 +59,14 @@ export class ReferralsService {
       where: { id: userId },
       include: {
         _count: {
-          select: { referrals: true },
+          select: {
+            referrals: {
+              where: {
+                emailVerified: true,
+                totalDeposits: { gt: 0 },
+              },
+            },
+          },
         },
       },
     });
@@ -56,20 +75,37 @@ export class ReferralsService {
       throw new NotFoundException('User not found');
     }
 
-    // Get level 1 referrals (direct)
+    // Get level 1 referrals (direct) - only verified with deposits
     const level1Referrals = await this.prisma.user.findMany({
-      where: { referredBy: userId },
+      where: {
+        referredBy: userId,
+        emailVerified: true,
+        totalDeposits: { gt: 0 },
+      },
       select: {
         id: true,
         totalDeposits: true,
-        _count: { select: { referrals: true } },
+        _count: {
+          select: {
+            referrals: {
+              where: {
+                emailVerified: true,
+                totalDeposits: { gt: 0 },
+              },
+            },
+          },
+        },
       },
     });
 
-    // Get level 2 referrals
+    // Get level 2 referrals - only verified with deposits
     const level1Ids = level1Referrals.map((r) => r.id);
     const level2Count = await this.prisma.user.count({
-      where: { referredBy: { in: level1Ids } },
+      where: {
+        referredBy: { in: level1Ids },
+        emailVerified: true,
+        totalDeposits: { gt: 0 },
+      },
     });
 
     // Calculate total team deposits
@@ -113,8 +149,13 @@ export class ReferralsService {
     ): Promise<any[]> => {
       if (currentDepth > depth) return [];
 
+      // Only include users with verified email AND at least one deposit
       const children = await this.prisma.user.findMany({
-        where: { referredBy: parentId },
+        where: {
+          referredBy: parentId,
+          emailVerified: true,
+          totalDeposits: { gt: 0 },
+        },
         select: {
           id: true,
           username: true,

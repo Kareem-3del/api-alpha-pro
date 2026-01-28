@@ -14,6 +14,86 @@ export class ProfitsService {
     private configService: ConfigService,
   ) {}
 
+  // TESTING: Run every 5 minutes for Testing package only (remove after testing)
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async distributeTestingProfits() {
+    this.logger.log('Starting Testing package profit distribution (5min interval)...');
+
+    try {
+      // Find the Testing package
+      const testingPackage = await this.prisma.package.findUnique({
+        where: { name: 'Testing' },
+      });
+
+      if (!testingPackage) {
+        return; // Testing package not found, skip
+      }
+
+      const activeInvestments = await this.prisma.investment.findMany({
+        where: {
+          status: 'ACTIVE',
+          packageId: testingPackage.id,
+          endDate: { gt: new Date() },
+        },
+        include: { user: true },
+      });
+
+      if (activeInvestments.length === 0) {
+        return;
+      }
+
+      for (const investment of activeInvestments) {
+        // Calculate profit for 5 minutes (dailyProfit / 288 since 24*60/5 = 288 intervals per day)
+        const fiveMinuteProfitAmount =
+          (Number(investment.amount) * Number(investment.dailyProfit)) / 100 / 288;
+
+        await this.prisma.$transaction([
+          this.prisma.user.update({
+            where: { id: investment.userId },
+            data: {
+              balance: { increment: fiveMinuteProfitAmount },
+              totalProfit: { increment: fiveMinuteProfitAmount },
+            },
+          }),
+          this.prisma.investment.update({
+            where: { id: investment.id },
+            data: {
+              totalProfit: { increment: fiveMinuteProfitAmount },
+              lastProfitAt: new Date(),
+            },
+          }),
+          this.prisma.profitRecord.create({
+            data: {
+              userId: investment.userId,
+              investmentId: investment.id,
+              amount: new Decimal(fiveMinuteProfitAmount),
+              profitDate: new Date(),
+            },
+          }),
+          this.prisma.transaction.create({
+            data: {
+              userId: investment.userId,
+              type: 'PROFIT',
+              amount: new Decimal(fiveMinuteProfitAmount),
+              netAmount: new Decimal(fiveMinuteProfitAmount),
+              status: 'CONFIRMED',
+              description: `Testing profit (5min interval)`,
+            },
+          }),
+        ]);
+
+        // Process team commissions for testing profits too
+        await this.processTeamCommission(investment.userId, fiveMinuteProfitAmount);
+      }
+
+      this.logger.log(
+        `Testing profit distribution completed for ${activeInvestments.length} investments`,
+      );
+    } catch (error) {
+      this.logger.error('Error distributing testing profits', error);
+    }
+  }
+
   // Run every day at midnight UTC
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async distributeDailyProfits() {
@@ -197,17 +277,25 @@ export class ProfitsService {
       // Get the week that just ended (Saturday to Saturday)
       const { weekStart, weekEnd } = getWeekBounds(new Date());
 
-      // Get all users with their referral counts
+      // Get all users with their referral counts (only count verified referrals with deposits)
       const users = await this.prisma.user.findMany({
         where: { status: 'ACTIVE' },
         include: {
           _count: {
-            select: { referrals: true },
+            select: {
+              referrals: {
+                where: {
+                  emailVerified: true,
+                  totalDeposits: { gt: 0 },
+                },
+              },
+            },
           },
         },
       });
 
       for (const user of users) {
+        // Only count referrals with verified email AND at least one deposit
         const referralCount = user._count.referrals;
         const salaryAmount = getWeeklySalaryAmount(referralCount);
 
@@ -280,5 +368,69 @@ export class ProfitsService {
       where: { userId },
       orderBy: { weekStart: 'desc' },
     });
+  }
+
+  // TESTING: Cleanup testing data (remove after testing)
+  async cleanupTestingData() {
+    this.logger.log('Starting Testing data cleanup...');
+
+    try {
+      const testingPackage = await this.prisma.package.findUnique({
+        where: { name: 'Testing' },
+      });
+
+      if (!testingPackage) {
+        return { message: 'Testing package not found, nothing to clean up' };
+      }
+
+      // Get all testing investments
+      const testingInvestments = await this.prisma.investment.findMany({
+        where: { packageId: testingPackage.id },
+        select: { id: true, userId: true },
+      });
+
+      const investmentIds = testingInvestments.map((i) => i.id);
+
+      // Delete profit records for testing investments
+      const deletedProfitRecords = await this.prisma.profitRecord.deleteMany({
+        where: { investmentId: { in: investmentIds } },
+      });
+
+      // Delete transactions related to testing (by description)
+      const deletedTransactions = await this.prisma.transaction.deleteMany({
+        where: {
+          OR: [
+            { description: { contains: 'Testing profit' } },
+            { description: { contains: 'Investment in Testing package' } },
+          ],
+        },
+      });
+
+      // Delete testing investments
+      const deletedInvestments = await this.prisma.investment.deleteMany({
+        where: { packageId: testingPackage.id },
+      });
+
+      // Deactivate the Testing package (don't delete to avoid foreign key issues)
+      await this.prisma.package.update({
+        where: { id: testingPackage.id },
+        data: { isActive: false },
+      });
+
+      this.logger.log('Testing data cleanup completed');
+
+      return {
+        message: 'Testing data cleaned up successfully',
+        deleted: {
+          profitRecords: deletedProfitRecords.count,
+          transactions: deletedTransactions.count,
+          investments: deletedInvestments.count,
+        },
+        note: 'User balances were NOT reverted. Please adjust manually if needed.',
+      };
+    } catch (error) {
+      this.logger.error('Error cleaning up testing data', error);
+      throw error;
+    }
   }
 }

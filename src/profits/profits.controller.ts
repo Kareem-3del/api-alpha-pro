@@ -37,4 +37,11 @@ export class ProfitsController {
   async triggerWeeklySalary() {
     return this.profitsService.triggerWeeklySalary();
   }
+
+  // TESTING: Cleanup testing data (remove after testing)
+  @Post('cleanup-testing')
+  @UseGuards(AdminGuard)
+  async cleanupTestingData() {
+    return this.profitsService.cleanupTestingData();
+  }
 }

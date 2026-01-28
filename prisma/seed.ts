@@ -29,6 +29,14 @@ async function main() {
       minAmount: 100,
       maxAmount: 100000,
     },
+    // TESTING PLAN - Earnings every 5 minutes (remove after testing)
+    {
+      name: 'Testing',
+      durationDays: 1,
+      dailyProfit: 10.0, // High profit for testing
+      minAmount: 1,
+      maxAmount: 1000000,
+    },
   ];
 
   for (const pkg of packages) {

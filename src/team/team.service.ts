@@ -63,9 +63,13 @@ export class TeamService {
   }
 
   async getTeamLevels(userId: string) {
-    // Level 1 members (direct referrals)
+    // Level 1 members (direct referrals) - only verified with deposits
     const level1Members = await this.prisma.user.findMany({
-      where: { referredBy: userId },
+      where: {
+        referredBy: userId,
+        emailVerified: true,
+        totalDeposits: { gt: 0 },
+      },
       select: {
         id: true,
         username: true,
@@ -79,10 +83,14 @@ export class TeamService {
       },
     });
 
-    // Level 2 members
+    // Level 2 members - only verified with deposits
     const level1Ids = level1Members.map((m) => m.id);
     const level2Members = await this.prisma.user.findMany({
-      where: { referredBy: { in: level1Ids } },
+      where: {
+        referredBy: { in: level1Ids },
+        emailVerified: true,
+        totalDeposits: { gt: 0 },
+      },
       select: {
         id: true,
         username: true,
@@ -141,7 +149,14 @@ export class TeamService {
       where: { id: userId },
       include: {
         _count: {
-          select: { referrals: true },
+          select: {
+            referrals: {
+              where: {
+                emailVerified: true,
+                totalDeposits: { gt: 0 },
+              },
+            },
+          },
         },
       },
     });
@@ -150,6 +165,7 @@ export class TeamService {
       throw new NotFoundException('User not found');
     }
 
+    // Only count referrals with verified email AND at least one deposit
     const referralCount = user._count.referrals;
     const currentSalary = getWeeklySalaryAmount(referralCount);
 

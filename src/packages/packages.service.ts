@@ -87,7 +87,7 @@ export class PackagesService {
       this.prisma.transaction.create({
         data: {
           userId,
-          type: 'DEPOSIT',
+          type: 'INVESTMENT',
           amount: new Decimal(amount),
           netAmount: new Decimal(amount),
           status: 'CONFIRMED',
@@ -148,6 +148,14 @@ export class PackagesService {
         dailyProfit: new Decimal(4.6),
         minAmount: new Decimal(100),
         maxAmount: new Decimal(100000),
+      },
+      // TESTING PLAN - Earnings every 5 minutes (remove after testing)
+      {
+        name: 'Testing',
+        durationDays: 1,
+        dailyProfit: new Decimal(10.0),
+        minAmount: new Decimal(1),
+        maxAmount: new Decimal(1000000),
       },
     ];
 

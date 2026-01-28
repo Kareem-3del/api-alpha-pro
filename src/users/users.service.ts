@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { getWeeklySalaryAmount, generateOTP } from '../common/utils/helpers';
@@ -33,7 +34,12 @@ export class UsersService {
         wallet: true,
         _count: {
           select: {
-            referrals: true,
+            referrals: {
+              where: {
+                emailVerified: true,
+                totalDeposits: { gt: 0 },
+              },
+            },
             investments: { where: { status: 'ACTIVE' } },
           },
         },
@@ -68,45 +74,19 @@ export class UsersService {
   }
 
   async getDashboard(userId: string) {
+    // Simple version - just get user basic data
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: {
-        wallet: true,
-        investments: {
-          where: { status: 'ACTIVE' },
-          include: { package: true },
-          orderBy: { createdAt: 'desc' },
-        },
-        transactions: {
-          take: 10,
-          orderBy: { createdAt: 'desc' },
-        },
-        _count: {
-          select: {
-            referrals: true,
-          },
-        },
-      },
     });
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    // Calculate total active investment amount
-    const totalActiveInvestment = user.investments.reduce(
-      (sum, inv) => sum + Number(inv.amount),
-      0,
-    );
-
-    // Calculate expected daily profit
-    const expectedDailyProfit = user.investments.reduce(
-      (sum, inv) => sum + (Number(inv.amount) * Number(inv.dailyProfit)) / 100,
-      0,
-    );
-
-    // Calculate weekly salary info
-    const referralCount = user._count.referrals;
+    // Return minimal data for now
+    const referralCount = 0;
+    const totalActiveInvestment = 0;
+    const expectedDailyProfit = 0;
     const currentWeeklySalary = getWeeklySalaryAmount(referralCount);
 
     // Calculate next tier
@@ -142,22 +122,14 @@ export class UsersService {
       expectedDailyProfit,
       referralCode: user.referralCode,
       referralCount,
-      hasWallet: !!user.wallet,
+      hasWallet: false,
       hasPin: !!user.withdrawalPin,
       currentWeeklySalary,
       nextTierReferrals,
       nextTierSalary,
       referralsNeeded,
-      activeInvestments: user.investments.map((inv) => ({
-        id: inv.id,
-        packageName: inv.package.name,
-        amount: inv.amount,
-        dailyProfit: inv.dailyProfit,
-        totalProfit: inv.totalProfit,
-        startDate: inv.startDate,
-        endDate: inv.endDate,
-      })),
-      recentTransactions: user.transactions,
+      activeInvestments: [],
+      recentTransactions: [],
     };
   }
 

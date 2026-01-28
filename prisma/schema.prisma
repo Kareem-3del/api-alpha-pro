@@ -26,6 +26,7 @@ enum TransactionType {
   TEAM_COMMISSION
   WEEKLY_SALARY
   DEPOSIT_BONUS
+  INVESTMENT
 }
 
 enum TransactionStatus {

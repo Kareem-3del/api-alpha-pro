@@ -171,6 +171,10 @@ export class TransactionsService {
           stats.totalDepositBonuses += amount;
           stats.netBalance += amount;
           break;
+        case TransactionType.INVESTMENT:
+          // Investments deduct from balance
+          stats.netBalance -= amount;
+          break;
       }
     }
 

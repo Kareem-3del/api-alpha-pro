@@ -11,11 +11,13 @@ export class UsersController {
 
   @Get('profile')
   async getProfile(@CurrentUser() user: AuthenticatedUser) {
+    console.log('Profile controller called, user:', user?.id);
     return this.usersService.getProfile(user.id);
   }
 
   @Get('dashboard')
   async getDashboard(@CurrentUser() user: AuthenticatedUser) {
+    console.log('Dashboard controller called, user:', user?.id);
     return this.usersService.getDashboard(user.id);
   }
 

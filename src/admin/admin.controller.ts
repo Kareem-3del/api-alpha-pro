@@ -4,8 +4,7 @@ import {
   Post,
   Param,
   Query,
-  Headers,
-  UnauthorizedException,
+  UseGuards,
   Logger,
   Body,
 } from '@nestjs/common';
@@ -14,8 +13,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WalletPoolService } from '../deposits/wallet-pool.service';
 import { DepositsService } from '../deposits/deposits.service';
 import { WalletNetwork } from '@prisma/client';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 @Controller('admin')
+@UseGuards(JwtAuthGuard, AdminGuard)
 export class AdminController {
   private readonly logger = new Logger(AdminController.name);
 
@@ -26,22 +28,10 @@ export class AdminController {
     private depositsService: DepositsService,
   ) {}
 
-  /**
-   * Verify admin secret
-   */
-  private verifyAdminAccess(adminSecret: string) {
-    const secret = this.configService.get<string>('ADMIN_SECRET');
-    if (!secret || adminSecret !== secret) {
-      throw new UnauthorizedException('Invalid admin secret');
-    }
-  }
-
   // ==================== DASHBOARD STATS ====================
 
   @Get('stats')
-  async getDashboardStats(@Headers('x-admin-secret') adminSecret: string) {
-    this.verifyAdminAccess(adminSecret);
-
+  async getDashboardStats() {
     const [
       totalUsers,
       activeUsers,
@@ -81,12 +71,7 @@ export class AdminController {
   // ==================== WALLET MANAGEMENT ====================
 
   @Get('wallets')
-  async getAllWallets(
-    @Headers('x-admin-secret') adminSecret: string,
-    @Query('network') network?: string,
-  ) {
-    this.verifyAdminAccess(adminSecret);
-
+  async getAllWallets(@Query('network') network?: string) {
     const wallets = await this.walletPoolService.getAllWallets(
       network as WalletNetwork | undefined,
     );
@@ -95,12 +80,7 @@ export class AdminController {
   }
 
   @Get('wallets/:id')
-  async getWalletDetails(
-    @Headers('x-admin-secret') adminSecret: string,
-    @Param('id') walletId: string,
-  ) {
-    this.verifyAdminAccess(adminSecret);
-
+  async getWalletDetails(@Param('id') walletId: string) {
     const wallet = await this.prisma.depositWallet.findUnique({
       where: { id: walletId },
     });
@@ -123,12 +103,7 @@ export class AdminController {
   }
 
   @Get('wallets/:id/private-key')
-  async getWalletPrivateKey(
-    @Headers('x-admin-secret') adminSecret: string,
-    @Param('id') walletId: string,
-  ) {
-    this.verifyAdminAccess(adminSecret);
-
+  async getWalletPrivateKey(@Param('id') walletId: string) {
     const wallet = await this.walletPoolService.getWalletWithPrivateKey(walletId);
 
     if (!wallet) {
@@ -146,12 +121,7 @@ export class AdminController {
   }
 
   @Get('wallets/:id/balance')
-  async getWalletBalance(
-    @Headers('x-admin-secret') adminSecret: string,
-    @Param('id') walletId: string,
-  ) {
-    this.verifyAdminAccess(adminSecret);
-
+  async getWalletBalance(@Param('id') walletId: string) {
     const wallet = await this.prisma.depositWallet.findUnique({
       where: { id: walletId },
     });
@@ -164,12 +134,7 @@ export class AdminController {
   }
 
   @Post('wallets/:id/transfer-to-master')
-  async transferToMaster(
-    @Headers('x-admin-secret') adminSecret: string,
-    @Param('id') walletId: string,
-  ) {
-    this.verifyAdminAccess(adminSecret);
-
+  async transferToMaster(@Param('id') walletId: string) {
     this.logger.log(`Admin initiated transfer to master for wallet ${walletId}`);
 
     try {
@@ -185,12 +150,9 @@ export class AdminController {
 
   @Get('deposits')
   async getAllDeposits(
-    @Headers('x-admin-secret') adminSecret: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
   ) {
-    this.verifyAdminAccess(adminSecret);
-
     const where = status ? { status: status as any } : {};
     const take = limit ? parseInt(limit) : 100;
 
@@ -213,12 +175,7 @@ export class AdminController {
   }
 
   @Get('deposits/:id')
-  async getDepositDetails(
-    @Headers('x-admin-secret') adminSecret: string,
-    @Param('id') depositId: string,
-  ) {
-    this.verifyAdminAccess(adminSecret);
-
+  async getDepositDetails(@Param('id') depositId: string) {
     const deposit = await this.prisma.deposit.findUnique({
       where: { id: depositId },
       include: {
@@ -237,12 +194,9 @@ export class AdminController {
 
   @Post('deposits/:id/confirm')
   async confirmDeposit(
-    @Headers('x-admin-secret') adminSecret: string,
     @Param('id') depositId: string,
     @Body('txHash') txHash: string,
   ) {
-    this.verifyAdminAccess(adminSecret);
-
     this.logger.log(`Admin confirming deposit ${depositId} with txHash ${txHash}`);
 
     try {
@@ -254,12 +208,7 @@ export class AdminController {
   }
 
   @Post('deposits/:id/cancel')
-  async cancelDeposit(
-    @Headers('x-admin-secret') adminSecret: string,
-    @Param('id') depositId: string,
-  ) {
-    this.verifyAdminAccess(adminSecret);
-
+  async cancelDeposit(@Param('id') depositId: string) {
     this.logger.log(`Admin cancelling deposit ${depositId}`);
 
     const deposit = await this.prisma.deposit.update({
@@ -273,12 +222,7 @@ export class AdminController {
   // ==================== USER MANAGEMENT ====================
 
   @Get('users')
-  async getAllUsers(
-    @Headers('x-admin-secret') adminSecret: string,
-    @Query('limit') limit?: string,
-  ) {
-    this.verifyAdminAccess(adminSecret);
-
+  async getAllUsers(@Query('limit') limit?: string) {
     const take = limit ? parseInt(limit) : 100;
 
     const users = await this.prisma.user.findMany({
@@ -302,12 +246,7 @@ export class AdminController {
   }
 
   @Get('users/:id')
-  async getUserDetails(
-    @Headers('x-admin-secret') adminSecret: string,
-    @Param('id') userId: string,
-  ) {
-    this.verifyAdminAccess(adminSecret);
-
+  async getUserDetails(@Param('id') userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
