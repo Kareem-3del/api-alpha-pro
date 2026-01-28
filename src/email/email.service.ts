@@ -384,4 +384,22 @@ export class EmailService {
     const html = this.getEmailTemplate(content);
     await this.sendOrLog(to, `🏆 ${this.appName} - Weekly Salary $${salary}`, html);
   }
+
+  async sendPasswordResetEmail(to: string, code: string): Promise<void> {
+    const content = `
+      <h2 style="margin: 0 0 16px 0; color: #1e293b; font-size: 24px; font-weight: 700;">Password Reset Request</h2>
+      <p style="margin: 0 0 8px 0; color: #475569; font-size: 15px; line-height: 1.6;">
+        We received a request to reset your password. Use the verification code below to proceed with resetting your password.
+      </p>
+      ${this.getOtpBox(code)}
+      <div style="background: #fee2e2; border-radius: 8px; padding: 16px; margin: 24px 0;">
+        <p style="margin: 0; color: #991b1b; font-size: 13px;">
+          <strong>Security Warning:</strong> If you didn't request a password reset, please ignore this email and your password will remain unchanged. Consider securing your account if you receive multiple unexpected reset requests.
+        </p>
+      </div>
+    `;
+
+    const html = this.getEmailTemplate(content, "This code will expire in 15 minutes.");
+    await this.sendOrLog(to, `${this.appName} - Password Reset Code`, html, { code });
+  }
 }

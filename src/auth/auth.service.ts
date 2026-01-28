@@ -10,7 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { VerifyEmailDto, ResendCodeDto } from './dto/verify-email.dto';
+import { VerifyEmailDto, ResendCodeDto, ForgotPasswordDto, ResetPasswordDto } from './dto/verify-email.dto';
 import { generateReferralCode, generateOTP } from '../common/utils/helpers';
 
 @Injectable()
@@ -286,5 +286,99 @@ export class AuthService {
       sub: userId,
       email,
     });
+  }
+
+  async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
+    const { email } = forgotPasswordDto;
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      // Don't reveal if user exists or not for security
+      return {
+        message: 'If an account with that email exists, a password reset code has been sent.',
+      };
+    }
+
+    await this.sendPasswordResetCode(user.id, email);
+
+    return {
+      message: 'If an account with that email exists, a password reset code has been sent.',
+    };
+  }
+
+  async resetPassword(resetPasswordDto: ResetPasswordDto) {
+    const { email, code, newPassword, confirmPassword } = resetPasswordDto;
+
+    if (newPassword !== confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid request');
+    }
+
+    const verificationCode = await this.prisma.verificationCode.findFirst({
+      where: {
+        userId: user.id,
+        code,
+        type: 'PASSWORD_RESET',
+        used: false,
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (!verificationCode) {
+      throw new BadRequestException('Invalid or expired reset code');
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Mark code as used and update password
+    await this.prisma.$transaction([
+      this.prisma.verificationCode.update({
+        where: { id: verificationCode.id },
+        data: { used: true },
+      }),
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { password: hashedPassword },
+      }),
+    ]);
+
+    return {
+      message: 'Password reset successfully. You can now login with your new password.',
+    };
+  }
+
+  private async sendPasswordResetCode(userId: string, email: string) {
+    const code = generateOTP();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    // Invalidate previous codes
+    await this.prisma.verificationCode.updateMany({
+      where: { userId, type: 'PASSWORD_RESET', used: false },
+      data: { used: true },
+    });
+
+    // Create new code
+    await this.prisma.verificationCode.create({
+      data: {
+        userId,
+        code,
+        type: 'PASSWORD_RESET',
+        expiresAt,
+      },
+    });
+
+    // Send email
+    await this.emailService.sendPasswordResetEmail(email, code);
   }
 }
