@@ -98,8 +98,10 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const { username, password } = loginDto;
 
+    // Allow login with either username or email
+    const isEmail = username.includes('@');
     const user = await this.prisma.user.findUnique({
-      where: { username },
+      where: isEmail ? { email: username } : { username },
       include: { wallet: true },
     });
 
