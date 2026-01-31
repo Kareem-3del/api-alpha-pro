@@ -44,6 +44,9 @@ export class AdminController {
       failedDeposits,
       walletStats,
       totalBalance,
+      totalDepositAmount,
+      totalWithdrawalAmount,
+      totalPendingWithdrawals,
     ] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.user.count({ where: { status: 'ACTIVE' } }),
@@ -53,6 +56,9 @@ export class AdminController {
       this.prisma.deposit.count({ where: { status: 'FAILED' } }),
       this.walletPoolService.getPoolStats(),
       this.prisma.user.aggregate({ _sum: { balance: true } }),
+      this.prisma.deposit.aggregate({ _sum: { amount: true }, where: { status: 'CONFIRMED' } }),
+      this.prisma.withdrawal.aggregate({ _sum: { amount: true }, where: { status: 'COMPLETED' } }),
+      this.prisma.withdrawal.count({ where: { status: 'PENDING' } }),
     ]);
 
     return {
@@ -65,6 +71,11 @@ export class AdminController {
         pending: pendingDeposits,
         confirmed: confirmedDeposits,
         failed: failedDeposits,
+        totalAmount: totalDepositAmount._sum.amount || 0,
+      },
+      withdrawals: {
+        totalAmount: totalWithdrawalAmount._sum.amount || 0,
+        pending: totalPendingWithdrawals,
       },
       wallets: walletStats,
       totalUserBalance: totalBalance._sum.balance || 0,
@@ -292,6 +303,12 @@ export class AdminController {
             id: true,
             username: true,
             email: true,
+            wallet: {
+              select: {
+                address: true,
+                network: true,
+              },
+            },
           },
         },
       },
