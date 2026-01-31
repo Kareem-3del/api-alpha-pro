@@ -346,34 +346,33 @@ export class WebhookController {
 
     if (!user?.referrer) return;
 
-    const referralBonusPercent = this.configService.get<number>(
-      'REFERRAL_BONUS_PERCENT',
-      7,
+    const depositBonusPercent = this.configService.get<number>(
+      'DEPOSIT_BONUS_PERCENT',
+      3,
     );
-    const bonusAmount = (depositAmount * referralBonusPercent) / 100;
+    const bonusAmount = (depositAmount * depositBonusPercent) / 100;
 
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: user.referrer.id },
         data: {
           balance: { increment: bonusAmount },
-          totalTeamEarnings: { increment: bonusAmount },
         },
       }),
       this.prisma.transaction.create({
         data: {
           userId: user.referrer.id,
-          type: 'REFERRAL_BONUS',
+          type: 'DEPOSIT_BONUS',
           amount: new Decimal(bonusAmount),
           netAmount: new Decimal(bonusAmount),
           status: 'CONFIRMED',
-          description: `${referralBonusPercent}% referral bonus from ${user.username}`,
+          description: `${depositBonusPercent}% deposit bonus from ${user.username}'s deposit`,
         },
       }),
     ]);
 
     this.logger.log(
-      `Referral bonus ${bonusAmount} credited to ${user.referrer.username}`,
+      `Deposit bonus ${bonusAmount} credited to ${user.referrer.username}`,
     );
   }
 }

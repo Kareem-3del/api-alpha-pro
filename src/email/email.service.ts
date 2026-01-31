@@ -8,8 +8,8 @@ export class EmailService {
   private transporter: nodemailer.Transporter;
   private readonly isDevMode: boolean;
   private readonly appName = 'Alpha Pro';
-  private readonly supportEmail = 'support@alphapro.com';
-  private readonly websiteUrl = 'https://alphapro.com';
+  private readonly supportEmail = 'info@alpha-pro.ai';
+  private readonly websiteUrl = 'https://alpha-pro.ai';
 
   constructor(private configService: ConfigService) {
     const smtpUser = this.configService.get<string>('SMTP_USER');
@@ -22,10 +22,11 @@ export class EmailService {
       this.logger.warn('Email service running in DEV MODE - emails will be logged to console');
     }
 
+    const smtpPort = Number(this.configService.get('SMTP_PORT')) || 587;
     this.transporter = nodemailer.createTransport({
       host: this.configService.get<string>('SMTP_HOST'),
-      port: this.configService.get<number>('SMTP_PORT'),
-      secure: false,
+      port: smtpPort,
+      secure: smtpPort === 465,
       auth: {
         user: smtpUser,
         pass: smtpPass,

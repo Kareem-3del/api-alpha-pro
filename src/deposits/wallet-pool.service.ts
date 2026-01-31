@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TatumService } from '../tatum/tatum.service';
 import { WalletNetwork } from '@prisma/client';
 import { encrypt, decrypt } from '../common/utils/crypto.util';
+import { utils as ethersUtils } from 'ethers';
 
 // Wallet assignment duration in milliseconds (1 hour)
 const WALLET_ASSIGNMENT_DURATION = 60 * 60 * 1000;
@@ -69,6 +70,11 @@ export class WalletPoolService {
     const expiresAt = new Date(now.getTime() + WALLET_ASSIGNMENT_DURATION);
 
     if (availableWallet) {
+      // Ensure webhook exists for this wallet
+      if (!availableWallet.webhookId) {
+        await this.ensureWebhook(availableWallet.id, availableWallet.address);
+      }
+
       // Assign the available wallet to the user
       await this.prisma.depositWallet.update({
         where: { id: availableWallet.id },
@@ -161,6 +167,15 @@ export class WalletPoolService {
       privateKey = result.privateKey;
     }
 
+    // Verify address matches private key
+    const derivedAddress = ethersUtils.computeAddress('0x' + privateKey);
+    if (derivedAddress.toLowerCase() !== address.toLowerCase()) {
+      this.logger.error(
+        `Address mismatch! xpub address: ${address}, privateKey address: ${derivedAddress}. BSC_XPUB and BSC_MNEMONIC may not match.`,
+      );
+      throw new Error('Wallet address/key mismatch - check BSC_XPUB and BSC_MNEMONIC configuration');
+    }
+
     // Subscribe to webhook for this address
     const webhookUrl = this.configService.get<string>('WEBHOOK_URL');
     let webhookId: string | null = null;
@@ -211,6 +226,25 @@ export class WalletPoolService {
       throw new Error('ENCRYPTION_SECRET not configured');
     }
     return decrypt(encryptedKey, encryptionSecret);
+  }
+
+  /**
+   * Ensure a Tatum webhook exists for a wallet address
+   */
+  private async ensureWebhook(walletId: string, address: string) {
+    const webhookUrl = this.configService.get<string>('WEBHOOK_URL');
+    if (!webhookUrl) return;
+
+    try {
+      const webhookId = await this.tatumService.createWebhook(address, webhookUrl);
+      await this.prisma.depositWallet.update({
+        where: { id: walletId },
+        data: { webhookId },
+      });
+      this.logger.log(`Created missing webhook ${webhookId} for address ${address}`);
+    } catch (error) {
+      this.logger.warn(`Failed to create webhook for ${address}: ${error.message}`);
+    }
   }
 
   /**

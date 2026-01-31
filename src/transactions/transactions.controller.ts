@@ -78,7 +78,7 @@ export class TransactionsController {
   @Get('deposits')
   async getDeposits(
     @CurrentUser() user: AuthenticatedUser,
-    @Query() query: Omit<TransactionQueryDto, 'type'>,
+    @Query() query: TransactionQueryDto,
   ) {
     return this.transactionsService.getTransactionsByType(
       user.id,
@@ -94,7 +94,7 @@ export class TransactionsController {
   @Get('withdrawals')
   async getWithdrawals(
     @CurrentUser() user: AuthenticatedUser,
-    @Query() query: Omit<TransactionQueryDto, 'type'>,
+    @Query() query: TransactionQueryDto,
   ) {
     return this.transactionsService.getTransactionsByType(
       user.id,
@@ -110,7 +110,7 @@ export class TransactionsController {
   @Get('profits')
   async getProfits(
     @CurrentUser() user: AuthenticatedUser,
-    @Query() query: Omit<TransactionQueryDto, 'type'>,
+    @Query() query: TransactionQueryDto,
   ) {
     return this.transactionsService.getTransactionsByType(
       user.id,
