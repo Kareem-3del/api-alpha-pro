@@ -279,11 +279,12 @@ export class DepositsService {
 
     if (!user?.referrer) return;
 
-    const depositBonusPercent = this.configService.get<number>(
-      'DEPOSIT_BONUS_PERCENT',
-      3,
+    // Only Level 1: direct referrer gets 7% deposit referral bonus
+    const referralBonusPercent = this.configService.get<number>(
+      'REFERRAL_DEPOSIT_BONUS_PERCENT',
+      7,
     );
-    const bonusAmount = (depositAmount * depositBonusPercent) / 100;
+    const bonusAmount = (depositAmount * referralBonusPercent) / 100;
 
     await this.prisma.$transaction([
       this.prisma.user.update({
@@ -299,7 +300,7 @@ export class DepositsService {
           amount: new Decimal(bonusAmount),
           netAmount: new Decimal(bonusAmount),
           status: 'CONFIRMED',
-          description: `${depositBonusPercent}% deposit bonus from ${user.username}'s deposit`,
+          description: `${referralBonusPercent}% referral bonus from ${user.username}'s deposit`,
         },
       }),
     ]);

@@ -6,6 +6,7 @@ import { TatumService } from '../tatum/tatum.service';
 import { WalletNetwork } from '@prisma/client';
 import { encrypt, decrypt } from '../common/utils/crypto.util';
 import { utils as ethersUtils } from 'ethers';
+import { TronWeb } from 'tronweb';
 
 // Wallet assignment duration in milliseconds (1 hour)
 const WALLET_ASSIGNMENT_DURATION = 60 * 60 * 1000;
@@ -45,6 +46,11 @@ export class WalletPoolService {
     });
 
     if (existingAssignment) {
+      // Ensure webhook exists for this wallet
+      if (!existingAssignment.webhookId) {
+        await this.ensureWebhook(existingAssignment.id, existingAssignment.address, network);
+      }
+
       this.logger.log(
         `User ${userId} already has wallet assigned: ${existingAssignment.address}`,
       );
@@ -72,7 +78,7 @@ export class WalletPoolService {
     if (availableWallet) {
       // Ensure webhook exists for this wallet
       if (!availableWallet.webhookId) {
-        await this.ensureWebhook(availableWallet.id, availableWallet.address);
+        await this.ensureWebhook(availableWallet.id, availableWallet.address, network);
       }
 
       // Assign the available wallet to the user
@@ -141,7 +147,6 @@ export class WalletPoolService {
     // Check if we're in test mode (no real Tatum API key)
     const tatumKey = this.configService.get<string>('TATUM_API_KEY');
     const bscMnemonic = this.configService.get<string>('BSC_MNEMONIC');
-    this.logger.log(`Config check - TATUM_API_KEY: ${tatumKey?.substring(0, 15)}..., BSC_MNEMONIC: ${bscMnemonic?.substring(0, 15)}...`);
     const isTestMode = tatumKey?.includes('your-') ||
                        !bscMnemonic ||
                        bscMnemonic?.includes('your-');
@@ -160,20 +165,32 @@ export class WalletPoolService {
       address = result.address;
       privateKey = result.privateKey;
     } else {
-      // TRC20 - for now, use similar approach
-      // TODO: Implement TRON wallet generation
-      const result = await this.tatumService.generateBscAddress(nextIndex);
+      // TRC20 - TRON wallet generation
+      const result = await this.tatumService.generateTronAddress(nextIndex);
       address = result.address;
       privateKey = result.privateKey;
     }
 
     // Verify address matches private key
-    const derivedAddress = ethersUtils.computeAddress('0x' + privateKey);
-    if (derivedAddress.toLowerCase() !== address.toLowerCase()) {
-      this.logger.error(
-        `Address mismatch! xpub address: ${address}, privateKey address: ${derivedAddress}. BSC_XPUB and BSC_MNEMONIC may not match.`,
-      );
-      throw new Error('Wallet address/key mismatch - check BSC_XPUB and BSC_MNEMONIC configuration');
+    if (network === WalletNetwork.BEP20) {
+      const keyWithPrefix = privateKey.startsWith('0x') ? privateKey : '0x' + privateKey;
+      const derivedAddress = ethersUtils.computeAddress(keyWithPrefix);
+      if (derivedAddress.toLowerCase() !== address.toLowerCase()) {
+        this.logger.error(
+          `BEP20 address mismatch! Expected: ${address}, Got: ${derivedAddress}`,
+        );
+        throw new Error('BEP20 wallet address/key mismatch - check BSC_XPUB and BSC_MNEMONIC configuration');
+      }
+    } else if (network === WalletNetwork.TRC20) {
+      const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
+      const keyHex = privateKey.replace('0x', '');
+      const derivedAddress = tronWeb.address.fromPrivateKey(keyHex);
+      if (!derivedAddress || derivedAddress !== address) {
+        this.logger.error(
+          `TRC20 address mismatch! Expected: ${address}, Got: ${derivedAddress}`,
+        );
+        throw new Error('TRC20 wallet address/key mismatch - check BSC_MNEMONIC configuration');
+      }
     }
 
     // Subscribe to webhook for this address
@@ -182,7 +199,7 @@ export class WalletPoolService {
 
     if (webhookUrl) {
       try {
-        webhookId = await this.tatumService.createWebhook(address, webhookUrl);
+        webhookId = await this.tatumService.createWebhook(address, webhookUrl, network);
         this.logger.log(`Created webhook ${webhookId} for address ${address}`);
       } catch (error) {
         this.logger.warn(
@@ -231,12 +248,12 @@ export class WalletPoolService {
   /**
    * Ensure a Tatum webhook exists for a wallet address
    */
-  private async ensureWebhook(walletId: string, address: string) {
+  private async ensureWebhook(walletId: string, address: string, network?: WalletNetwork) {
     const webhookUrl = this.configService.get<string>('WEBHOOK_URL');
     if (!webhookUrl) return;
 
     try {
-      const webhookId = await this.tatumService.createWebhook(address, webhookUrl);
+      const webhookId = await this.tatumService.createWebhook(address, webhookUrl, network);
       await this.prisma.depositWallet.update({
         where: { id: walletId },
         data: { webhookId },

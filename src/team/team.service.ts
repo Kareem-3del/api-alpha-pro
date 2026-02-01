@@ -63,12 +63,11 @@ export class TeamService {
   }
 
   async getTeamLevels(userId: string) {
-    // Level 1 members (direct referrals) - only verified with deposits
+    // Level 1 members (direct referrals) - verified users
     const level1Members = await this.prisma.user.findMany({
       where: {
         referredBy: userId,
         emailVerified: true,
-        totalDeposits: { gt: 0 },
       },
       select: {
         id: true,
@@ -83,13 +82,12 @@ export class TeamService {
       },
     });
 
-    // Level 2 members - only verified with deposits
+    // Level 2 members - verified users
     const level1Ids = level1Members.map((m) => m.id);
     const level2Members = await this.prisma.user.findMany({
       where: {
         referredBy: { in: level1Ids },
         emailVerified: true,
-        totalDeposits: { gt: 0 },
       },
       select: {
         id: true,

@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
   Headers,
@@ -37,6 +38,17 @@ export class WebhookController {
     private emailService: EmailService,
     private walletPoolService: WalletPoolService,
   ) {}
+
+  /**
+   * Tatum test ping endpoint (GET)
+   * Tatum sends a GET request to verify the webhook URL is reachable
+   */
+  @Get('tatum')
+  @HttpCode(HttpStatus.OK)
+  handleTatumTestPing() {
+    this.logger.log('Received Tatum test ping (GET)');
+    return { status: 'ok' };
+  }
 
   /**
    * Tatum webhook endpoint for incoming transactions
@@ -242,9 +254,11 @@ export class WebhookController {
       'BSC_USDT',
       'TRC20_USDT',
       'BEP20_USDT',
-      // Add testnet tokens
+      // BSC USDT contract addresses
       '0x55d398326f99059fF775485246999027B3197955', // BSC USDT mainnet
       '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd', // BSC USDT testnet
+      // TRC20 USDT contract address (TRON mainnet)
+      'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
     ];
 
     return validAssets.some(
@@ -346,11 +360,12 @@ export class WebhookController {
 
     if (!user?.referrer) return;
 
-    const depositBonusPercent = this.configService.get<number>(
-      'DEPOSIT_BONUS_PERCENT',
-      3,
+    // Only Level 1: direct referrer gets 7% deposit referral bonus
+    const referralBonusPercent = this.configService.get<number>(
+      'REFERRAL_DEPOSIT_BONUS_PERCENT',
+      7,
     );
-    const bonusAmount = (depositAmount * depositBonusPercent) / 100;
+    const bonusAmount = (depositAmount * referralBonusPercent) / 100;
 
     await this.prisma.$transaction([
       this.prisma.user.update({
@@ -366,7 +381,7 @@ export class WebhookController {
           amount: new Decimal(bonusAmount),
           netAmount: new Decimal(bonusAmount),
           status: 'CONFIRMED',
-          description: `${depositBonusPercent}% deposit bonus from ${user.username}'s deposit`,
+          description: `${referralBonusPercent}% referral bonus from ${user.username}'s deposit`,
         },
       }),
     ]);
