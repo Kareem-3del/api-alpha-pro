@@ -162,17 +162,29 @@ export class WebhookController {
       return;
     }
 
-    // Calculate bonus
+    // Check if user already received a deposit bonus (one-time only)
+    const existingBonus = await this.prisma.transaction.findFirst({
+      where: {
+        userId: user.id,
+        type: 'DEPOSIT_BONUS',
+        status: 'CONFIRMED',
+        description: { contains: '% deposit bonus' },
+      },
+    });
+
+    // Calculate bonus (only for first deposit)
     const depositBonus = this.configService.get<number>('DEPOSIT_BONUS_PERCENT', 3);
-    const bonusAmount = (depositAmount * depositBonus) / 100;
+    const bonusAmount = existingBonus
+      ? 0
+      : (depositAmount * depositBonus) / 100;
     const totalAmount = depositAmount + bonusAmount;
 
     this.logger.log(
-      `Processing deposit: ${depositAmount} USDT from ${address} for user ${user.username}`,
+      `Processing deposit: ${depositAmount} USDT from ${address} for user ${user.username}${existingBonus ? ' (no bonus - already received)' : ''}`,
     );
 
     // Create deposit and update user balance in transaction
-    await this.prisma.$transaction([
+    const txOps: any[] = [
       // Create deposit record
       this.prisma.deposit.create({
         data: {
@@ -208,18 +220,25 @@ export class WebhookController {
           description: `Deposit via ${wallet.network}`,
         },
       }),
-      // Create bonus transaction record
-      this.prisma.transaction.create({
-        data: {
-          userId: user.id,
-          type: 'DEPOSIT_BONUS',
-          amount: new Decimal(bonusAmount),
-          netAmount: new Decimal(bonusAmount),
-          status: 'CONFIRMED',
-          description: `${depositBonus}% deposit bonus`,
-        },
-      }),
-    ]);
+    ];
+
+    // Only add bonus transaction if this is the first deposit
+    if (bonusAmount > 0) {
+      txOps.push(
+        this.prisma.transaction.create({
+          data: {
+            userId: user.id,
+            type: 'DEPOSIT_BONUS',
+            amount: new Decimal(bonusAmount),
+            netAmount: new Decimal(bonusAmount),
+            status: 'CONFIRMED',
+            description: `${depositBonus}% deposit bonus`,
+          },
+        }),
+      );
+    }
+
+    await this.prisma.$transaction(txOps);
 
     // Mark wallet as used
     await this.walletPoolService.markWalletUsed(wallet.id);
@@ -359,6 +378,23 @@ export class WebhookController {
     });
 
     if (!user?.referrer) return;
+
+    // Check if referrer already received a referral deposit bonus for this user (one-time only)
+    const existingReferralBonus = await this.prisma.transaction.findFirst({
+      where: {
+        userId: user.referrer.id,
+        type: 'DEPOSIT_BONUS',
+        status: 'CONFIRMED',
+        description: { contains: `from ${user.username}'s deposit` },
+      },
+    });
+
+    if (existingReferralBonus) {
+      this.logger.log(
+        `Referral deposit bonus already given to ${user.referrer.username} for ${user.username}, skipping`,
+      );
+      return;
+    }
 
     // Only Level 1: direct referrer gets 7% deposit referral bonus
     const referralBonusPercent = this.configService.get<number>(

@@ -57,7 +57,7 @@ export class AdminController {
       this.walletPoolService.getPoolStats(),
       this.prisma.user.aggregate({ _sum: { balance: true } }),
       this.prisma.deposit.aggregate({ _sum: { amount: true }, where: { status: 'CONFIRMED' } }),
-      this.prisma.withdrawal.aggregate({ _sum: { amount: true }, where: { status: 'COMPLETED' } }),
+      this.prisma.withdrawal.aggregate({ _sum: { amount: true }, where: { status: 'CONFIRMED' } }),
       this.prisma.withdrawal.count({ where: { status: 'PENDING' } }),
     ]);
 
@@ -71,14 +71,14 @@ export class AdminController {
         pending: pendingDeposits,
         confirmed: confirmedDeposits,
         failed: failedDeposits,
-        totalAmount: totalDepositAmount._sum.amount || 0,
+        totalAmount: totalDepositAmount._sum?.amount || 0,
       },
       withdrawals: {
-        totalAmount: totalWithdrawalAmount._sum.amount || 0,
+        totalAmount: totalWithdrawalAmount._sum?.amount || 0,
         pending: totalPendingWithdrawals,
       },
       wallets: walletStats,
-      totalUserBalance: totalBalance._sum.balance || 0,
+      totalUserBalance: totalBalance._sum?.balance || 0,
     };
   }
 
